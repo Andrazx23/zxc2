@@ -390,9 +390,6 @@ async function invalidateUserCache(userId, discordTag) {
  * Log action to webhook with error handling
  */
 async function logAction(title, executorTag, target, action, extra = "") {
-    const logMessage = `[LOG] ${title} | ${executorTag} → ${target} | ${action} | ${extra}`;
-    console.log(logMessage);
-
     if (!webhook) return;
 
     try {
@@ -2017,16 +2014,12 @@ If you're a buyer, click on the buttons below to redeem your key, get the script
 
 if (!process.env.TOKEN) {
     console.error('❌ Missing TOKEN in environment variables!');
-    console.error('Please set TOKEN in your .env file');
     process.exit(1);
-} else {
-    client.login(process.env.TOKEN)
-        .then(() => {
-            console.log('🔐 Successfully logged in to Discord!');
-            console.log('🚀 Enterprise Edition - Ready for 10,000++ buyers!');
-        })
-        .catch(err => {
-            console.error('❌ Login failed:', err);
-            process.exit(1);
-        });
 }
+
+client.login(process.env.TOKEN)
+    .then(() => console.log(`✅ ${client.user.tag} is online`))
+    .catch(err => {
+        console.error('❌ Login failed:', err);
+        process.exit(1);
+    });
