@@ -34,12 +34,12 @@ const PREMIUM_ROLE_ID = process.env.PREMIUM_ROLE_ID || "1434842978932752405";
 const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || "1452500424551567360";
 const WHITELIST_SCRIPT_LINK = "https://discord.com/channels/1434540370284384338/1434755316808941718/1463912895501959374";
 
-// Cache configuration - OPTIMIZED untuk 10,000++ users
-const CACHE_DURATION = 300000; // 5 menit
-const CACHE_SOFT_REFRESH = 60000; // 1 menit untuk background refresh
-const COOLDOWN_DURATION = 3000; // 3 detik cooldown
-const BATCH_LIMIT = 450; // Firestore batch limit (buffer dari 500)
-const MAX_CACHE_SIZE = 2000; // Maximum 2000 users dalam cache
+// Cache configuration - Optimized for 10,000+ concurrent users
+const CACHE_DURATION = 300000; // 5 minutes
+const CACHE_SOFT_REFRESH = 60000; // 1 minute for background refresh
+const COOLDOWN_DURATION = 3000; // 3 seconds cooldown
+const BATCH_LIMIT = 450; // Firestore batch limit (buffer from 500)
+const MAX_CACHE_SIZE = 2000; // Maximum 2000 users in cache
 
 // ==================== LRU CACHE IMPLEMENTATION ====================
 class LRUCache {
@@ -65,7 +65,6 @@ class LRUCache {
         if (this.cache.size >= this.maxSize) {
             const firstKey = this.cache.keys().next().value;
             this.cache.delete(firstKey);
-            console.log(`[LRU EVICTION] Removed ${firstKey} from cache`);
         }
 
         this.cache.set(key, value);
@@ -133,7 +132,7 @@ function isValidKeyFormat(key) {
 }
 
 /**
- * Safe batch commit dengan split untuk large operations
+ * Safe batch commit with split for large operations
  */
 async function safeBatchCommit(operations) {
     if (operations.length === 0) return 0;
@@ -157,7 +156,6 @@ async function safeBatchCommit(operations) {
 
     try {
         await Promise.all(batches.map(b => b.commit()));
-        console.log(`[BATCH] Committed ${operations.length} operations in ${batches.length} batch(es)`);
         return batches.length;
     } catch (error) {
         console.error('[BATCH ERROR]', error);
@@ -203,14 +201,14 @@ async function refreshUserKeysBackground(userId, discordTag) {
 }
 
 /**
- * Refresh dan dapatkan user keys dari database - COMPREHENSIVE QUERY
+ * Refresh and get user keys from database - Comprehensive query
  */
 async function refreshUserKeys(userId, discordTag, isBackground = false) {
     const startTime = Date.now();
     const username = discordTag.includes('#') ? discordTag.split('#')[0] : discordTag;
 
     try {
-        // ✅ ALWAYS query SEMUA kemungkinan, tidak conditional
+        // Always query all possibilities, not conditional
         const [userIdSnapshot, tagSnapshot, usernameSnapshot, whitelistDoc] = await Promise.all([
             db.collection('keys').where('userId', '==', userId).get(),
             db.collection('keys').where('usedByDiscord', '==', discordTag).get(),
@@ -244,7 +242,6 @@ async function refreshUserKeys(userId, discordTag, isBackground = false) {
                 if (!data.usedByDiscord) updates.usedByDiscord = discordTag;
 
                 if (Object.keys(updates).length > 0) {
-                    console.log(`[MIGRATE] Key ${keyId} updating:`, updates);
                     updateOperations.push((batch) => batch.update(doc.ref, updates));
                 }
             });
@@ -307,14 +304,11 @@ async function refreshUserKeys(userId, discordTag, isBackground = false) {
 
         // Commit updates if any
         if (updateOperations.length > 0) {
-            console.log(`[MIGRATE] Updating ${updateOperations.length} keys for ${discordTag}`);
             await safeBatchCommit(updateOperations);
         }
 
         const result = Array.from(keysMap.keys());
         const duration = Date.now() - startTime;
-
-        console.log(`[KEYS ${isBackground ? 'BG' : ''}] ${discordTag} → ${result.length} keys (${duration}ms)`);
 
         // Update cache
         userKeyCache.set(userId, {
@@ -331,7 +325,7 @@ async function refreshUserKeys(userId, discordTag, isBackground = false) {
 }
 
 /**
- * Get user active keys dengan smart caching + deduplication
+ * Get user active keys with smart caching + deduplication
  */
 async function getUserActiveKeys(userId, discordTag, forceRefresh = false) {
     const cached = userKeyCache.get(userId);
@@ -354,16 +348,16 @@ async function getUserActiveKeys(userId, discordTag, forceRefresh = false) {
         }
     }
 
-    // Cache hit dan masih valid
+    // Cache hit and still valid
     if (cached && cached.expires > now) {
-        // Soft refresh di background jika perlu
+        // Soft refresh in background if needed
         if (cached.lastRefresh && (now - cached.lastRefresh) > CACHE_SOFT_REFRESH) {
             refreshUserKeysBackground(userId, discordTag).catch(() => { });
         }
         return cached.keys;
     }
 
-    // Cache miss atau expired - use deduplication
+    // Cache miss or expired - use deduplication
     if (pendingRefreshes.has(userId)) {
         return await pendingRefreshes.get(userId);
     }
@@ -379,13 +373,12 @@ async function getUserActiveKeys(userId, discordTag, forceRefresh = false) {
 }
 
 /**
- * Invalidate user cache dan force refresh
+ * Invalidate user cache and force refresh
  */
 async function invalidateUserCache(userId, discordTag) {
     userKeyCache.delete(userId);
-    console.log(`[CACHE] Invalidated cache for ${discordTag}`);
 
-    // Immediate refresh untuk ensure consistency
+    // Immediate refresh to ensure consistency
     try {
         await refreshUserKeys(userId, discordTag);
     } catch (error) {
@@ -394,7 +387,7 @@ async function invalidateUserCache(userId, discordTag) {
 }
 
 /**
- * Log action ke webhook dengan error handling
+ * Log action to webhook with error handling
  */
 async function logAction(title, executorTag, target, action, extra = "") {
     const logMessage = `[LOG] ${title} | ${executorTag} → ${target} | ${action} | ${extra}`;
@@ -430,7 +423,7 @@ async function logAction(title, executorTag, target, action, extra = "") {
 }
 
 /**
- * Safe reply dengan comprehensive error handling
+ * Safe reply with comprehensive error handling
  */
 async function safeReply(interaction, opts) {
     try {
@@ -465,7 +458,7 @@ async function safeReply(interaction, opts) {
 
         try {
             await interaction.followUp({
-                content: '⚠️ Terjadi error saat mengirim pesan. Silakan coba lagi.',
+                content: '⚠️ An error occurred while sending the message. Please try again.',
                 ephemeral: true
             });
         } catch (e) {
@@ -475,7 +468,7 @@ async function safeReply(interaction, opts) {
 }
 
 /**
- * Check cooldown untuk user
+ * Check cooldown for user
  */
 function checkCooldown(userId, duration = COOLDOWN_DURATION) {
     const now = Date.now();
@@ -485,12 +478,11 @@ function checkCooldown(userId, duration = COOLDOWN_DURATION) {
         const remaining = Math.ceil((userCooldown - now) / 1000);
         return { onCooldown: true, remaining };
     }
-
     return { onCooldown: false };
 }
 
 /**
- * Set cooldown untuk user
+ * Set cooldown for user
  */
 function setCooldown(userId, duration = COOLDOWN_DURATION) {
     cooldowns.set(userId, Date.now() + duration);
@@ -539,8 +531,6 @@ setInterval(() => {
     if (cleanedCooldowns > 0 || cleanedOperations > 0) {
         console.log(`[CLEANUP] Cooldowns: ${cleanedCooldowns}, Operations: ${cleanedOperations}`);
     }
-
-    console.log(`[MEMORY] Cooldowns: ${cooldowns.size}, Cache: ${userKeyCache.size}, Operations: ${activeOperations.size}, Pending: ${pendingRefreshes.size}`);
 }, 300000); // Every 5 minutes
 
 // ==================== ERROR HANDLERS ====================
@@ -750,7 +740,7 @@ client.on('interactionCreate', async (interaction) => {
 
         if (interaction.isChatInputCommand()) {
             if (!interaction.member?.roles.cache.has(STAFF_ROLE_ID)) {
-                return safeReply(interaction, "❌ Hanya staff dengan role khusus yang dapat menggunakan command ini!");
+                return safeReply(interaction, "❌ Only staff with the special role can use this command!");
             }
 
             const commandName = interaction.commandName;
@@ -766,7 +756,7 @@ client.on('interactionCreate', async (interaction) => {
                     const whitelistRef = db.collection('whitelist').doc(targetUser.id);
 
                     if ((await whitelistRef.get()).exists) {
-                        return interaction.editReply({ content: `⚠️ ${targetTag} sudah di whitelist!` });
+                        return interaction.editReply({ content: `⚠️ ${targetTag} is already whitelisted!` });
                     }
 
                     const newKey = generateKey();
@@ -822,7 +812,7 @@ client.on('interactionCreate', async (interaction) => {
                     }
 
                     return interaction.editReply({
-                        content: `✅ Sukses whitelist **${targetTag}**!\n\nKey: \`${newKey}\`\nRole otomatis diberikan jika user ada di server.`
+                        content: `✅ Successfully whitelisted **${targetTag}**!\n\nRoles have been automatically assigned if the user is in the server.`
                     });
                 }
 
@@ -832,10 +822,10 @@ client.on('interactionCreate', async (interaction) => {
                     const doc = await db.collection('whitelist').doc(targetUser.id).get();
 
                     if (!doc.exists) {
-                        return interaction.editReply({ content: `⚠️ ${targetTag} tidak di whitelist!` });
+                        return interaction.editReply({ content: `⚠️ ${targetTag} is not whitelisted!` });
                     }
 
-                    // ✅ FIX: Hapus SEMUA key user (tidak cuma whitelist key)
+                    // Remove ALL user keys (not just whitelist key)
                     const userKeys = await getUserActiveKeys(targetUser.id, targetTag, true);
                     const operations = [];
 
@@ -869,7 +859,7 @@ client.on('interactionCreate', async (interaction) => {
                     await logAction("WHITELIST REMOVE", interaction.user.tag, targetTag, "Remove", `Keys deleted: ${userKeys.length}`);
 
                     return interaction.editReply({
-                        content: `✅ Berhasil hapus **${targetTag}** dari whitelist!\n\n📊 Total keys dihapus: **${userKeys.length}**\n👑 Role otomatis dihapus.`
+                        content: `✅ Successfully removed **${targetTag}** from whitelist!\n\n📊 Total keys deleted: **${userKeys.length}**\n👑 Role automatically removed.`
                     });
                 }
 
@@ -877,7 +867,7 @@ client.on('interactionCreate', async (interaction) => {
                     const snapshot = await db.collection('whitelist').orderBy('addedAt', 'desc').limit(50).get();
 
                     if (snapshot.empty) {
-                        return interaction.editReply({ content: "ℹ️ Whitelist kosong!" });
+                        return interaction.editReply({ content: "ℹ️ Whitelist is empty!" });
                     }
 
                     const list = snapshot.docs.map((doc, idx) => {
@@ -907,7 +897,7 @@ client.on('interactionCreate', async (interaction) => {
                     const blacklistRef = db.collection('blacklist').doc(targetUser.id);
 
                     if ((await blacklistRef.get()).exists) {
-                        return interaction.editReply({ content: `⚠️ ${targetTag} sudah di blacklist!` });
+                        return interaction.editReply({ content: `⚠️ ${targetTag} is already blacklisted!` });
                     }
 
                     const operations = [];
@@ -956,7 +946,7 @@ client.on('interactionCreate', async (interaction) => {
                     await invalidateUserCache(targetUser.id, targetTag);
 
                     return interaction.editReply({
-                        content: `✅ Sukses blacklist **${targetTag}**!\n\n${userKeys.length} key dihapus + role dihapus.`
+                        content: `✅ Successfully blacklisted **${targetTag}**!\n\n${userKeys.length} keys deleted + role removed.`
                     });
                 }
 
@@ -966,9 +956,9 @@ client.on('interactionCreate', async (interaction) => {
                     const doc = await db.collection('blacklist').doc(targetUser.id).get();
 
                     if (!doc.exists) {
-                        return interaction.editReply({ content: `⚠️ ${targetTag} tidak di blacklist!` });
+                        return interaction.editReply({ content: `⚠️ ${targetTag} is not blacklisted!` });
                     }
-
+                    x
                     await doc.ref.delete();
                     await logAction("BLACKLIST REMOVE", interaction.user.tag, targetTag, "Remove");
 
@@ -1209,7 +1199,7 @@ client.on('interactionCreate', async (interaction) => {
                 } else {
                     embed.addFields({
                         name: "⚠️ Status",
-                        value: "User tidak memiliki key aktif!",
+                        value: "User has no active keys!",
                         inline: false
                     });
                 }
@@ -1355,7 +1345,7 @@ client.on('interactionCreate', async (interaction) => {
                 } else {
                     embed.addFields({
                         name: "✅ Status",
-                        value: "Semua VIP sudah punya key!",
+                        value: "All VIPs already have keys!",
                         inline: false
                     });
                 }
@@ -1396,7 +1386,7 @@ client.on('interactionCreate', async (interaction) => {
                 } catch (error) {
                     console.error('[STATS ERROR]', error);
                     return interaction.editReply({
-                        content: "❌ Gagal mengambil statistik dari database."
+                        content: "❌ Failed to fetch statistics from database."
                     });
                 }
             }
@@ -1409,7 +1399,7 @@ client.on('interactionCreate', async (interaction) => {
                 const cooldownCheck = checkCooldown(userId);
                 if (cooldownCheck.onCooldown) {
                     return safeReply(interaction, {
-                        content: `⏰ Tunggu ${cooldownCheck.remaining} detik sebelum menggunakan fitur ini lagi!`,
+                        content: `⏰ Please wait ${cooldownCheck.remaining} seconds before using this feature again!`,
                         ephemeral: true
                     });
                 }
@@ -1423,7 +1413,7 @@ client.on('interactionCreate', async (interaction) => {
 
                 const input = new TextInputBuilder()
                     .setCustomId("key_input")
-                    .setLabel("Masukkan Key")
+                    .setLabel("Enter Key")
                     .setStyle(TextInputStyle.Short)
                     .setPlaceholder("VORAHUB-ABCDEF-123456-789012")
                     .setRequired(true)
@@ -1438,7 +1428,7 @@ client.on('interactionCreate', async (interaction) => {
             if (interaction.customId === "redeem_submit") {
                 if (!startOperation(userId, 'redeem')) {
                     return safeReply(interaction, {
-                        content: "⚠️ Kamu sedang melakukan redeem. Tunggu hingga selesai!",
+                        content: "⚠️ You are currently redeeming. Please wait until it's complete!",
                         ephemeral: true
                     });
                 }
@@ -1449,7 +1439,7 @@ client.on('interactionCreate', async (interaction) => {
                     const blacklistDoc = await db.collection('blacklist').doc(userId).get();
                     if (blacklistDoc.exists) {
                         return safeReply(interaction, {
-                            content: "❌ Kamu di-blacklist dan tidak bisa redeem key!",
+                            content: "❌ You are blacklisted and cannot redeem keys!",
                             ephemeral: true
                         });
                     }
@@ -1458,12 +1448,12 @@ client.on('interactionCreate', async (interaction) => {
 
                     if (!isValidKeyFormat(inputKey)) {
                         return safeReply(interaction, {
-                            content: "❌ Format key salah! Harus: `VORAHUB-XXXXXX-XXXXXX-XXXXXX`",
+                            content: "❌ Invalid key format! Must be: `VORAHUB-XXXXXX-XXXXXX-XXXXXX`",
                             ephemeral: true
                         });
                     }
 
-                    // ✅ USE TRANSACTION to prevent race condition
+                    // Use transaction to prevent race condition
                     const result = await db.runTransaction(async (transaction) => {
                         const keyRef = db.collection('keys').doc(inputKey);
                         const pendingRef = db.collection('generated_keys').doc(inputKey);
@@ -1523,7 +1513,7 @@ client.on('interactionCreate', async (interaction) => {
                     setCooldown(userId);
 
                     return safeReply(interaction, {
-                        content: `✅ Key \`${inputKey}\` berhasil diredeem!\n\n🎉 Kamu sekarang bisa pakai semua fitur panel.\n👑 Role Premium otomatis diberikan jika kamu di server.`,
+                        content: `✅ Key \`${inputKey}\` successfully redeemed!\n\n🎉 You can now use all panel features.\n👑 Premium role automatically granted if you're in the server.`,
                         ephemeral: true
                     });
 
@@ -1531,14 +1521,14 @@ client.on('interactionCreate', async (interaction) => {
                     if (error.message.startsWith('ALREADY_USED:')) {
                         const usedBy = error.message.split(':')[1];
                         return safeReply(interaction, {
-                            content: `❌ Key sudah dipakai oleh **${usedBy}**!`,
+                            content: `❌ Key already used by **${usedBy}**!`,
                             ephemeral: true
                         });
                     }
 
                     if (error.message === 'INVALID_KEY') {
                         return safeReply(interaction, {
-                            content: "❌ Key tidak valid atau sudah kadaluarsa!",
+                            content: "❌ Invalid or expired key!",
                             ephemeral: true
                         });
                     }
@@ -1547,7 +1537,7 @@ client.on('interactionCreate', async (interaction) => {
                     await logAction("REDEEM ERROR", discordTag, "N/A", "Error", error.message);
 
                     return safeReply(interaction, {
-                        content: "❌ Terjadi error. Silakan coba lagi atau hubungi admin.",
+                        content: "❌ An error occurred. Please try again or contact admin.",
                         ephemeral: true
                     });
                 } finally {
@@ -1569,7 +1559,7 @@ client.on('interactionCreate', async (interaction) => {
 
                     if (!interaction.guild) {
                         return safeReply(interaction, {
-                            content: "❌ Fitur ini hanya bisa dipakai di server.",
+                            content: "❌ This feature can only be used in a server.",
                             ephemeral: true
                         });
                     }
@@ -1577,7 +1567,7 @@ client.on('interactionCreate', async (interaction) => {
                     const keys = await getUserActiveKeys(userId, discordTag, true);
                     if (keys.length === 0) {
                         return safeReply(interaction, {
-                            content: "❌ Kamu belum punya key aktif! Silakan redeem key terlebih dahulu.",
+                            content: "❌ You don't have an active key yet! Please redeem a key first.",
                             ephemeral: true
                         });
                     }
@@ -1585,14 +1575,14 @@ client.on('interactionCreate', async (interaction) => {
                     const member = await interaction.guild.members.fetch(userId).catch(() => null);
                     if (!member) {
                         return safeReply(interaction, {
-                            content: "❌ Gagal menemukan member di server.",
+                            content: "❌ Failed to find member in server.",
                             ephemeral: true
                         });
                     }
 
                     if (member.roles.cache.has(PREMIUM_ROLE_ID)) {
                         return safeReply(interaction, {
-                            content: "✅ Kamu sudah punya role Premium!",
+                            content: "✅ You already have the Premium role!",
                             ephemeral: true
                         });
                     }
@@ -1602,7 +1592,7 @@ client.on('interactionCreate', async (interaction) => {
                     setCooldown(userId);
 
                     return safeReply(interaction, {
-                        content: "✅ Role Premium berhasil diberikan!",
+                        content: "✅ Premium role successfully granted!",
                         ephemeral: true
                     });
 
@@ -1626,7 +1616,7 @@ client.on('interactionCreate', async (interaction) => {
                     const keys = await getUserActiveKeys(userId, discordTag, true);
                     if (keys.length === 0) {
                         return safeReply(interaction, {
-                            content: "❌ Kamu belum punya key aktif! Silakan redeem key atau whitelist terlebih dahulu.",
+                            content: "❌ You don't have an active key yet! Please redeem or whitelist first.",
                             ephemeral: true
                         });
                     }
@@ -1644,7 +1634,7 @@ client.on('interactionCreate', async (interaction) => {
 
                     const select = new StringSelectMenuBuilder()
                         .setCustomId("getscript_select")
-                        .setPlaceholder("Pilih key untuk get script")
+                        .setPlaceholder("Select key to get script")
                         .addOptions(keys.map(k => ({
                             label: k.substring(0, 25),
                             description: k.substring(25) || "...",
@@ -1652,7 +1642,7 @@ client.on('interactionCreate', async (interaction) => {
                         })));
 
                     return safeReply(interaction, {
-                        content: `📝 Kamu punya **${keys.length}** key. Pilih satu untuk get script:`,
+                        content: `You have **${keys.length}** keys. Select one to get the script:`,
                         components: [new ActionRowBuilder().addComponents(select)],
                         ephemeral: true
                     });
@@ -1692,7 +1682,7 @@ client.on('interactionCreate', async (interaction) => {
                     const keys = await getUserActiveKeys(userId, discordTag, true);
                     if (keys.length === 0) {
                         return safeReply(interaction, {
-                            content: "❌ Kamu belum punya key aktif!",
+                            content: "❌ You don't have an active key yet!",
                             ephemeral: true
                         });
                     }
@@ -1707,7 +1697,7 @@ client.on('interactionCreate', async (interaction) => {
                         setCooldown(userId);
 
                         return safeReply(interaction, {
-                            content: `✅ HWID untuk key \`${keys[0]}\` telah direset.`,
+                            content: `✅ HWID for key \`${keys[0]}\` has been reset.`,
                             ephemeral: true
                         });
                     }
@@ -1715,16 +1705,16 @@ client.on('interactionCreate', async (interaction) => {
                     const row = new ActionRowBuilder().addComponents(
                         new ButtonBuilder()
                             .setCustomId("reset_all_confirm")
-                            .setLabel("Reset Semua HWID")
+                            .setLabel("Reset All HWID")
                             .setStyle(ButtonStyle.Danger),
                         new ButtonBuilder()
                             .setCustomId("reset_choose_key")
-                            .setLabel("Pilih Key Tertentu")
+                            .setLabel("Choose Specific Key")
                             .setStyle(ButtonStyle.Primary)
                     );
 
                     return safeReply(interaction, {
-                        content: `🔑 Kamu punya **${keys.length}** key aktif.\nMau reset HWID semua key atau pilih satu?`,
+                        content: `🔑 You have **${keys.length}** active keys.\nDo you want to reset HWID for all keys or choose one?`,
                         components: [row],
                         ephemeral: true
                     });
@@ -1758,7 +1748,7 @@ client.on('interactionCreate', async (interaction) => {
                 setCooldown(userId);
 
                 return safeReply(interaction, {
-                    content: `✅ HWID untuk **${keys.length}** key telah direset semua!`,
+                    content: `✅ HWID for **${keys.length}** keys has been reset!`,
                     ephemeral: true
                 });
             }
@@ -1776,7 +1766,7 @@ client.on('interactionCreate', async (interaction) => {
 
                 const select = new StringSelectMenuBuilder()
                     .setCustomId("reset_select_key")
-                    .setPlaceholder("Pilih key untuk reset HWID")
+                    .setPlaceholder("Select key to reset HWID")
                     .addOptions(keys.map(k => ({
                         label: k.substring(0, 25),
                         description: k.substring(25) || "...",
@@ -1784,7 +1774,7 @@ client.on('interactionCreate', async (interaction) => {
                     })));
 
                 return safeReply(interaction, {
-                    content: "🔑 Pilih key yang ingin direset HWID-nya:",
+                    content: "🔑 Select the key you want to reset HWID for:",
                     components: [new ActionRowBuilder().addComponents(select)],
                     ephemeral: true
                 });
@@ -1804,7 +1794,7 @@ client.on('interactionCreate', async (interaction) => {
                 setCooldown(userId);
 
                 return safeReply(interaction, {
-                    content: `✅ HWID untuk key \`${key}\` telah direset.`,
+                    content: `✅ HWID for key \`${key}\` has been reset.`,
                     ephemeral: true
                 });
             }
@@ -1820,7 +1810,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         await safeReply(interaction, {
-            content: "❌ Terjadi error internal. Tim telah diberitahu.",
+            content: "❌ An internal error occurred. The team has been notified.",
             ephemeral: true
         });
     }
@@ -1836,7 +1826,7 @@ client.on('messageCreate', async (msg) => {
         const cmd = args.shift()?.toLowerCase();
 
         if (!msg.member?.roles.cache.has(STAFF_ROLE_ID)) {
-            return msg.reply("❌ Hanya staff dengan role khusus!");
+            return msg.reply("❌ Only staff with the special role!");
         }
 
         // ========== !panel ==========
@@ -1872,7 +1862,7 @@ client.on('messageCreate', async (msg) => {
 
             await logAction("PANEL CREATED", msg.author.tag, msg.channel.name, "Create Panel");
 
-            const confirm = await msg.reply("✅ Panel berhasil dibuat!");
+            const confirm = await msg.reply("✅ Panel successfully created!");
             setTimeout(() => confirm.delete().catch(() => { }), 5000);
             return;
         }
@@ -1926,7 +1916,7 @@ If you're a buyer, click on the buttons below to redeem your key, get the script
 
             await logAction("PANEL TEXT CREATED", msg.author.tag, msg.channel.name, "Create Text Panel");
 
-            const confirm = await msg.reply("✅ Panel text berhasil dibuat!");
+            const confirm = await msg.reply("✅ Text panel successfully created!");
             setTimeout(() => confirm.delete().catch(() => { }), 5000);
             return;
         }
@@ -1991,7 +1981,7 @@ If you're a buyer, click on the buttons below to redeem your key, get the script
             const snapshot = await db.collection('generated_keys').orderBy('createdAt', 'desc').limit(50).get();
 
             if (snapshot.empty) {
-                return msg.reply("ℹ️ Tidak ada key pending.");
+                return msg.reply("ℹ️ No pending keys.");
             }
 
             const list = snapshot.docs.map((doc, idx) => {
@@ -2019,7 +2009,7 @@ If you're a buyer, click on the buttons below to redeem your key, get the script
             }).catch(() => { });
         }
 
-        msg.reply('❌ Terjadi error internal.').catch(() => { });
+        msg.reply('❌ An internal error occurred.').catch(() => { });
     }
 });
 
