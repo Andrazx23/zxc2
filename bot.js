@@ -179,7 +179,9 @@ function isKeyExpired(keyData) {
         return !isNaN(expiryTime) && expiryTime < Date.now();
     } catch (error) {
         console.error('[EXPIRY CHECK ERROR]', error);
-        return true;
+        // FAIL-SAFE: Jika error cek expired, anggap key MASIH AKTIF (false)
+        // Agar user tidak kehilangan akses karena data corrupt/legacy
+        return false;
     }
 }
 
@@ -230,6 +232,7 @@ async function refreshUserKeys(userId, discordTag, isBackground = false) {
 
                 // Skip expired non-permanent keys
                 if (!data.whitelisted && isKeyExpired(data)) {
+                    console.log(`[SKIP EXPIRED] Key ${keyId} for ${discordTag} is expired. (ExpiresAt: ${data.expiresAt})`);
                     return;
                 }
 
@@ -567,11 +570,10 @@ client.on('shardError', (err) => {
 // ==================== BOT READY ====================
 
 client.once('ready', async () => {
-    console.log(`✅ Bot ${client.user.tag} is ONLINE and ENTERPRISE-READY!`);
+    console.log(`✅ Bot ${client.user.tag} is ONLINE`);
     console.log(`📊 Serving ${client.guilds.cache.size} guilds with ${client.users.cache.size} users`);
-    console.log(`🚀 Optimized for 10,000++ concurrent buyers`);
 
-    client.user.setActivity('Vorahub On Top | Enterprise Edition', { type: 4 });
+    client.user.setActivity('Vorahub On Top', { type: 4 });
 
     try {
         const [keysSnap, whitelistSnap, blacklistSnap, generatedSnap] = await Promise.all([
@@ -589,17 +591,15 @@ client.once('ready', async () => {
 
         if (webhook) {
             const embed = new EmbedBuilder()
-                .setTitle('🟢 Bot Online - Enterprise Edition')
-                .setDescription(`${client.user.tag} is now online and ready for 10,000++ buyers!`)
+                .setTitle('🟢 Bot Online')
+                .setDescription(`${client.user.tag} is now online!`)
                 .addFields(
                     { name: 'Guilds', value: `${client.guilds.cache.size}`, inline: true },
                     { name: 'Users', value: `${client.users.cache.size}`, inline: true },
                     { name: 'Status', value: '✅ Operational', inline: true },
                     { name: 'Database Keys', value: `${keysSnap.data().count}`, inline: true },
                     { name: 'Whitelist', value: `${whitelistSnap.data().count}`, inline: true },
-                    { name: 'Blacklist', value: `${blacklistSnap.data().count}`, inline: true },
-                    { name: 'Cache Size', value: `${MAX_CACHE_SIZE} entries (LRU)`, inline: true },
-                    { name: 'Optimizations', value: '✅ All Critical Bugs Fixed', inline: true }
+                    { name: 'Blacklist', value: `${blacklistSnap.data().count}`, inline: true }
                 )
                 .setColor('#00ff00')
                 .setTimestamp();
@@ -823,13 +823,16 @@ client.on('interactionCreate', async (interaction) => {
                     }
 
                     // Remove ALL user keys (not just whitelist key)
-                    const userKeys = await getUserActiveKeys(targetUser.id, targetTag, true);
+                    // Hapus data whitelist
+                    const whitelistData = doc.data();
                     const operations = [];
 
                     operations.push((batch) => batch.delete(doc.ref));
 
-                    for (const key of userKeys) {
-                        operations.push((batch) => batch.delete(db.collection('keys').doc(key)));
+                    // Hanya hapus key yang TERHUBUNG dengan whitelist ini
+                    // Key lain (misal hasil beli/redeem sendiri) TIDAK DIGANGGU
+                    if (whitelistData.key) {
+                        operations.push((batch) => batch.delete(db.collection('keys').doc(whitelistData.key)));
                     }
 
                     await safeBatchCommit(operations);
@@ -837,9 +840,13 @@ client.on('interactionCreate', async (interaction) => {
                     if (interaction.guild) {
                         try {
                             const member = await interaction.guild.members.fetch(targetUser.id);
-                            if (member && member.roles.cache.has(PREMIUM_ROLE_ID)) {
+                            // Cek apakah dia punya key lain selain whitelist?
+                            // Kalau masih punya, JANGAN cabut role. Kalau habis, baru cabut.
+                            const remainingKeys = await getUserActiveKeys(targetUser.id, targetTag, true);
+
+                            if (remainingKeys.length === 0 && member && member.roles.cache.has(PREMIUM_ROLE_ID)) {
                                 await member.roles.remove(PREMIUM_ROLE_ID);
-                                await logAction("ROLE AUTO", interaction.user.tag, targetTag, "Role Removed (Whitelist)");
+                                await logAction("ROLE AUTO", interaction.user.tag, targetTag, "Role Removed (Whitelist Remove)");
                             }
                         } catch (err) {
                             console.error('[ROLE REMOVE ERROR]', err.message);
@@ -847,16 +854,16 @@ client.on('interactionCreate', async (interaction) => {
                     }
 
                     try {
-                        await interaction.channel.send(`<@${targetUser.id}> You have been removed from whitelist! 💔To find out why, go to\n${WHITELIST_SCRIPT_LINK} and click on **Redeem** button`);
+                        await interaction.channel.send(`<@${targetUser.id}> You have been removed from whitelist!`);
                     } catch (err) {
                         console.error('[NOTIFICATION ERROR]', err.message);
                     }
 
                     await invalidateUserCache(targetUser.id, targetTag);
-                    await logAction("WHITELIST REMOVE", interaction.user.tag, targetTag, "Remove", `Keys deleted: ${userKeys.length}`);
+                    await logAction("WHITELIST REMOVE", interaction.user.tag, targetTag, "Remove", `Key deleted: ${whitelistData.key || "None"}`);
 
                     return interaction.editReply({
-                        content: `✅ Successfully removed **${targetTag}** from whitelist!\n\n📊 Total keys deleted: **${userKeys.length}**\n👑 Role automatically removed.`
+                        content: `✅ Successfully removed **${targetTag}** from whitelist!\n�️ Whitelist Key has been deleted.`
                     });
                 }
 
@@ -955,7 +962,7 @@ client.on('interactionCreate', async (interaction) => {
                     if (!doc.exists) {
                         return interaction.editReply({ content: `⚠️ ${targetTag} is not blacklisted!` });
                     }
-                    x
+
                     await doc.ref.delete();
                     await logAction("BLACKLIST REMOVE", interaction.user.tag, targetTag, "Remove");
 
@@ -1363,20 +1370,17 @@ client.on('interactionCreate', async (interaction) => {
                     ]);
 
                     const embed = new EmbedBuilder()
-                        .setTitle("📊 Bot Statistics - Enterprise Edition")
+                        .setTitle("📊 Bot Statistics")
                         .addFields(
                             { name: "🔑 Total Keys", value: `${keysSnap.data().count}`, inline: true },
                             { name: "✅ Whitelist", value: `${whitelistSnap.data().count}`, inline: true },
                             { name: "🚫 Blacklist", value: `${blacklistSnap.data().count}`, inline: true },
                             { name: "⏳ Pending Keys", value: `${generatedSnap.data().count}`, inline: true },
                             { name: "👥 Guilds", value: `${client.guilds.cache.size}`, inline: true },
-                            { name: "💾 Cache Size", value: `${userKeyCache.size}/${MAX_CACHE_SIZE}`, inline: true },
-                            { name: "⏰ Active Cooldowns", value: `${cooldowns.size}`, inline: true },
-                            { name: "🔄 Active Operations", value: `${activeOperations.size}`, inline: true },
                             { name: "⏱️ Uptime", value: `<t:${Math.floor((Date.now() - client.uptime) / 1000)}:R>`, inline: true }
                         )
                         .setColor("#0099ff")
-                        .setFooter({ text: '✅ All Critical Bugs Fixed | LRU Cache | Race Condition Protected' })
+                        .setFooter({ text: 'Vorahub Statistics' })
                         .setTimestamp();
 
                     return interaction.editReply({ embeds: [embed] });
